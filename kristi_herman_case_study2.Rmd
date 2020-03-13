@@ -1,0 +1,613 @@
+---
+title: "Case Study 2:  DDSAnalytics"
+author: "Kristi Herman"
+date: "03/11/2020"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+* The purpose of this analysis is to determine that factors that lead to employee attrition, predict employee turnover, and predict monthly income.
+
+```{r}
+# Import dependencies
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(naniar)
+library(class)
+library(caret)
+library(corrplot)
+library(ggthemes)
+library(ggpubr)
+library(gplots)
+library(arsenal)
+library(mltools)
+library(GGally)
+library(e1071)
+
+# Import employee data and prediction data
+empl_df <-  read.csv("CaseStudy2-data.csv")
+
+```
+
+* Basic Data Exploration
+
+```{r}
+
+# Check to make sure data imported
+dim(empl_df)
+View(empl_df)
+
+# Check to see if there's any missing data
+gg_miss_var(empl_df)
+
+# Get summary statistics
+summary(empl_df)
+str(empl_df)
+
+# Confirm that these fields only have one value unique values, and min/max values are
+unique(empl_df$Over18)
+unique(empl_df$StandardHours)
+unique(empl_df$EmployeeCount)
+
+# Look at values in more fields
+unique(empl_df$JobInvolvement)
+str(unique(empl_df$EmployeeNumber))
+
+
+```
+
+* Data cleaning
+
+```{r}
+
+# Reorder columns
+empl_data <- empl_df[c(1,11,3,2,4:10,12:36)]
+head(empl_data)
+str(empl_data)
+dim(empl_data)
+
+# Max and mins
+min(empl_data[,36])
+max(empl_data[,36])
+
+# Drop Over18, StandardHours, EmployeeCount, ID, MonthlyRate
+empl_data <- empl_data[ , -which(names(empl_data) %in% c("EmployeeNumber", "Over18","StandardHours", "EmployeeCount", "MonthlyRate", "HourlyRate", "DailyRate"))]
+
+head(empl_data)
+
+```
+
+* Overall Attrition for the Dataset is 16%
+
+```{r}
+
+# Determine and Plot Attrition for the Dataset
+attr <- empl_data %>% group_by(Attrition) %>% summarize(count=n())
+attr_pct <- attr$count[2]/dim(empl_data)[1]*100
+
+p <- attr %>% ggplot(aes(x = Attrition, y = count)) +
+  geom_bar(stat = "identity", fill = "blue", alpha = .6) +
+  ggtitle("Attrition Overview") + xlab("Attrition") + ylab("Number of Employees") + 
+  geom_text(aes(y = count, label = count), fontface = "bold", vjust = 1.2, color = "white", size = 3)  
+
+p
+
+```
+
+* Average Monthly Salary By Job Role - Managers & Research Directors have the highest average monthly salaries
+
+```{r}
+
+#  Get average monthly salary for each job satisfaction categories
+income <- empl_data %>% group_by(JobRole) %>% summarize(mean_size = round(mean(MonthlyIncome)), digits = 2)
+
+# Plot data
+p <- income %>%
+  ggplot(aes(x = reorder(JobRole, -mean_size), y = mean_size)) +
+  geom_bar(stat = "identity", fill = "blue", alpha = .6) +
+  ggtitle("Job Role & Average Monthly Salary") + xlab("Job Role") + ylab("Average Monthly Salary") + 
+  geom_text(aes(y = mean_size, label = mean_size), fontface = "bold", vjust = 1.2, color = "white", size = 3)  
+
+p + rotate_x_text(45)
+
+```
+
+* Job Satisfaction By Job Role
+
+```{r}
+
+#  Get average monthly salary for each job satisfaction categories
+satis <- empl_data %>% group_by(JobRole) 
+
+# Distribution of job satisfaction by job role (Scatter)
+p <- ggplot(data = empl_data) +
+  geom_point(mapping = aes(x = JobRole, y = JobSatisfaction, color = JobSatisfaction), position ="jitter") +
+  ggtitle("Job Satisfaction By Job Role") + xlab("Job Role") + ylab("Job Satisfaction")
+
+p + rotate_x_text(45)
+
+
+```
+
+* Average Job Satisfaction By Job Role - Managers & Research Directors have the lowest average job satisfaction
+
+```{r}
+
+#  Get average monthly salary for each job satisfaction categories
+satis <- empl_data %>% group_by(JobRole) %>% summarize(mean_size = round(mean(JobSatisfaction), digits = 2))
+
+# Plot data
+p <- satis %>%
+  ggplot(aes(x = reorder(JobRole, mean_size), y = mean_size)) +
+  geom_bar(stat = "identity", fill = "blue", alpha = .6) +
+  ggtitle("Job Role & Average Job Satisfaction") + xlab("Job Role") + ylab("Average Job Satisfaction")  +
+  geom_text(aes(y = mean_size, label = mean_size), fontface = "bold", vjust = 1.2, color = "white", size = 3) 
+
+p + rotate_x_text(45)
+
+
+
+```
+
+
+* Average Job Involvement By Job Role - Sales Reps have the Lowest Average Job Involvement
+
+```{r}
+
+#  Get average monthly salary for each job satisfaction categories
+involve <- empl_data %>% group_by(JobRole) %>% summarize(mean_size = round(mean(JobInvolvement), digits = 2))
+
+# Plot data
+p <- involve %>%
+  ggplot(aes(x = reorder(JobRole, mean_size), y = mean_size)) +
+  geom_bar(stat = "identity", fill = "blue", alpha = .6) +
+  ggtitle("Job Role & Average Job Involvement") + xlab("Job Role") + ylab("Average Job Involvement")  +
+  geom_text(aes(y = mean_size, label = mean_size), fontface = "bold", vjust = 1.2, color = "white", size = 3) 
+
+p + rotate_x_text(45)
+
+
+
+```
+
+* Attrition By Overtime - Non-Salaried or Overtime Employees have Higher Attrition
+
+```{r}
+
+#  Group jobs by job role and calculate percentage of attrition
+overtime <- empl_data %>% group_by(OverTime, Attrition) %>% summarize(count=n()) %>% mutate(total_by_overtime = sum(count)) 
+overtime$pct <- round(overtime$count/overtime$total_by_overtime, digits = 2)*100
+
+# Plot attrition by job role
+
+p <- ggplot(data=overtime, aes(x=OverTime, y=pct, fill=Attrition)) + geom_bar(stat="identity", alpha = .6) +
+  ggtitle("Attrition by Overtime") + xlab("Overtime") + ylab("Attrition (%)") + scale_fill_manual(values = c("blue","orange")) +
+  geom_text(aes(y = pct, label = pct), fontface = "bold", nudge_y = -1.5, color = "white", size = 3)
+
+p
+
+```
+
+* Attrition By Marital Status - Singles have the Highest Attrition While Divorced Employees have the Lowest Attrition
+
+```{r}
+
+#  Group jobs by job role and calculate percentage of attrition
+married <- empl_data %>% group_by(MaritalStatus, Attrition) %>% summarize(count=n()) %>% mutate(total_by_marriage = sum(count)) 
+married$pct <- round(married$count/married$total_by_marriage, digits = 2)*100
+
+# Plot attrition by job role
+
+p <- ggplot(data=married, aes(x=MaritalStatus, y=pct, fill=Attrition)) + geom_bar(stat="identity", alpha = .6) +
+  ggtitle("Attrition by Marital Status") + xlab("Marital Status") + ylab("Attrition (%)") + scale_fill_manual(values = c("blue","orange"))  +
+  geom_text(aes(y = pct, label = pct), fontface = "bold", vjust = 1, color = "white", size = 3)
+
+p + rotate_x_text(45)
+
+```
+
+* Attrition By Job Involvement - The Higher the Job Involvement, the Lower the Attrition is
+
+```{r}
+
+#  Group jobs by job role and calculate percentage of attrition
+job_involve <- empl_data %>% group_by(JobInvolvement, Attrition) %>% summarize(count=n()) %>% mutate(total_by_involvement = sum(count)) 
+job_involve$pct <- round(job_involve$count/job_involve$total_by_involvement, digits = 2)*100
+
+# Plot attrition by job role
+
+p <- ggplot(data=job_involve, aes(x=JobInvolvement, y=pct, fill=Attrition)) + geom_bar(stat="identity", alpha = .6) +
+  ggtitle("Attrition by Job Involvement") + xlab("Job Involvement") + ylab("Attrition (%)")  + scale_fill_manual(values = c("blue","orange")) + 
+  geom_text(aes(y = pct, label = pct), fontface = "bold", vjust = 1, color = "white", size = 3) 
+
+p
+
+```
+
+* Attrition By Role - Sales Reps have the Highest Attrition, While Research Directors, Manufacturing Directors, and Managers have the Lowest Attrition
+
+```{r}
+
+#  Group jobs by job role and calculate percentage of attrition
+job_role <- empl_data %>% group_by(JobRole, Attrition) %>% summarize(count=n()) %>% mutate(total_by_role = sum(count)) 
+job_role$pct <- round(job_role$count/job_role$total_by_role, digits = 2)*100
+
+# Plot attrition by job role
+
+p <- ggplot(data=job_role, aes(x=JobRole, y=pct, fill=Attrition)) + 
+  geom_bar(stat="identity", alpha = .6) +
+  ggtitle("Attrition by Role") + xlab("Job Role") + ylab("Attrition (%)") + scale_fill_manual(values = c("blue","orange")) + 
+geom_text(aes(y = pct, label = pct), fontface = "bold", vjust = 1, color = "white", size = 3)
+
+p + rotate_x_text(45)
+
+```
+
+* Attrition By Salary - Higher Paying Jobs Have Lower Attrition
+
+```{r}
+income_attr <- empl_data 
+income_attr$bin <- bin_data(income_attr$MonthlyIncome, bins=c(0, 4000, 8000, 12000, 16000, 20000), boundaryType = "[lorc")
+
+income_attr <- income_attr %>% group_by(bin, Attrition) %>% summarize(count=n()) %>% mutate(total_by_bin = sum(count)) 
+income_attr$pct <- round(income_attr$count/income_attr$total_by_bin, digits = 2)*100
+
+p <- ggplot(data=income_attr, aes(x=bin, y=pct, fill=Attrition)) + geom_bar(stat="identity", alpha = .6) +
+  ggtitle("Attrition by Salary") + xlab("Salary") + ylab("Attrition (%)")  + scale_fill_manual(values = c("blue","orange")) + 
+  geom_text(aes(y = pct, label = pct), fontface = "bold", vjust = 1, color = "white", size = 3) 
+
+p
+
+
+```
+
+
+* Attrition By Job Satisfaction - Higher Job Satisfaction Does Lead to Lower Attrition Overall
+
+```{r}
+
+#  Group jobs by job role and calculate percentage of attrition
+job_satis <- empl_data %>% group_by(JobSatisfaction, Attrition) %>% summarize(count=n()) %>% mutate(total_by_satis = sum(count)) 
+job_satis$pct <- round(job_satis$count/job_satis$total_by_satis, digits = 2)*100
+
+# Plot attrition by job role
+
+p <- ggplot(data=job_satis, aes(x=JobSatisfaction, y=pct, fill=Attrition)) + geom_bar(stat="identity", alpha = .6) +
+  ggtitle("Attrition by Job Satisfaction") + xlab("Job Satisfaction") + ylab("Attrition (%)")  + scale_fill_manual(values = c("blue","orange")) + 
+  geom_text(aes(y = pct, label = pct), fontface = "bold", vjust = 1, color = "white", size = 3) 
+
+p
+
+```
+
+* Overtime and Job Involvement - Non-Salaried, Overtime Eligible Employees have Lower Job Involvement
+
+```{r}
+
+#  Group jobs by job role and calculate percentage of attrition
+job_over <- empl_data %>% group_by(JobInvolvement, OverTime) %>% summarize(count=n()) %>% mutate(total_by_involvement = sum(count)) 
+job_over$pct <- round(job_over$count/job_over$total_by_involvement, digits = 2)*100
+
+# Plot attrition by job role
+
+p <- ggplot(data=job_over, aes(x=JobInvolvement, y=pct, fill=OverTime)) + geom_bar(stat="identity", alpha = .6) +
+  ggtitle("Overtime by Job Involvement") + xlab("Job Involvement") + ylab("Overtime(%)")  + scale_fill_manual(values = c("blue","orange")) + 
+  geom_text(aes(y = pct, label = pct), fontface = "bold", vjust = 1, color = "white", size = 3) 
+
+p
+
+```
+
+* Marital Status and Job Involvement
+
+```{r}
+
+#  Group jobs by job role and calculate percentage of attrition
+marital_status <- empl_data %>% group_by(JobInvolvement, MaritalStatus) %>% summarize(count=n()) %>% mutate(total_by_involvement = sum(count)) 
+marital_status$pct <- round(marital_status$count/marital_status$total_by_involvement, digits = 2)*100
+
+# Plot attrition by job role
+
+p <- ggplot(data=marital_status, aes(x=JobInvolvement, y=pct, fill=MaritalStatus)) + geom_bar(stat="identity", alpha = .6) +
+  ggtitle("Marital Status by Job Involvement") + xlab("Job Involvement") + ylab("Marital Status(%)")  + scale_fill_manual(values = c("blue","orange", "red")) 
+p
+
+```
+* Exploration - facet_wrap on all columns
+
+```{r}
+
+p <- ggplot() + 
+  geom_histogram(aes(x=JobInvolvement, fill = "r", color="r"), alpha=.7, data=empl_data, stat = "bin") +
+  ggtitle("Job Involvement") + xlab("Job Involvement") + ylab("Number of Employees") +
+  scale_color_manual(name="group", values=c("r" = "red"), labels=c("r"="Employees")) 
+
+p
+
+p <- ggplot() + 
+  geom_histogram(aes(x=JobInvolvement), alpha=.7, data=empl_data, stat = "bin") +
+  ggtitle("Job Involvement") + xlab("Job Involvement") + ylab("Number of Employees") +
+  scale_color_manual(name="Employees", values=c("r" = "red")) 
+
+p
+
+```
+
+
+* Exploration - facet_wrap on all columns
+
+```{r, fig.width=15, fig.height=15}
+
+# Get histograms of the data
+empl_data %>% keep(is.numeric) %>% gather %>% ggplot(aes(x = value)) + facet_wrap(~key, scales = "free")+ geom_histogram() 
+
+```
+
+* Correlation plot
+
+```{r, fig.width=15, fig.height=15}
+
+empl_data_corr <- empl_data
+
+# Make factors into integers
+empl_data_corr[c("JobRole","BusinessTravel","Department","EducationField","Gender", "JobSatisfaction", "MaritalStatus", "OverTime")] <-  lapply(empl_data[c("JobRole","BusinessTravel","Department","EducationField","Gender", "JobSatisfaction", "MaritalStatus", "OverTime")], as.integer)
+
+# Change Attrition to an integer
+empl_data_corr$Attrition <- as.numeric(empl_data_corr$Attrition)
+
+empl_data_corr %>%
+  keep(is.numeric) %>%
+  cor %>% 
+  corrplot("upper", diag = FALSE, order = "FPC", tl.pos = "td", tl.cex = 1, method = "color", tl.col = "black", addCoef.col = "grey", number.digits = 2, title="Correlation of Numerical Attributes", mar=c(0,0,1,0))
+
+# From this graph, not many of the attributes seem to be highly correlated with Attrition.  But these are the highest two attributes:  JobInvolvement, OverTime, and Marital Status.  
+
+```
+
+
+* GGpairs with the some of the features
+
+```{r, fig.width=10, fig.height=5}
+empl_data %>%
+select(JobInvolvement, TotalWorkingYears, Attrition) %>%
+ggpairs(mapping = aes(color = Attrition)) 
+```
+
+
+* KNN for each feature:  Conclusion - The specifity is not high enough with these variables.  There is not much variation when K is 3, 5, 30, or 100.
+
+```{r}
+
+# New dataset
+empl_knn <- empl_data
+
+# Make factors into integers
+empl_knn[c("JobRole","BusinessTravel","Department","EducationField","Gender", "JobSatisfaction", "MaritalStatus", "OverTime")] <- lapply(empl_knn[c("JobRole","BusinessTravel","Department","EducationField","Gender", "JobSatisfaction", "MaritalStatus", "OverTime")], as.integer)
+
+# Split training data into train and test data
+
+set.seed(sample(1:100, 1))
+split_perc = .75
+train_idx = sample(1:dim(empl_knn)[1],round(split_perc * dim(empl_knn)[1])) 
+train_idx
+train = empl_knn[train_idx,]
+test = empl_knn[-train_idx,]
+
+# Run the classification model on all the features
+classif_knn <-  knn(train[, 3:29],test[, 3:29],train$Attrition, prob = TRUE, k = 5)
+results <- confusionMatrix(table(classif_knn,test$Attrition))
+results
+
+
+# Create new dataframes for accuracy results
+acc_df_knn <- data.frame(feature_names=character(0),acc=numeric(0), sens=numeric(0), spec=numeric(0))
+
+# New test/train data
+set.seed(sample(1:100, 1))
+split_perc = .75
+train_idx = sample(1:dim(empl_knn)[1],round(split_perc * dim(empl_knn)[1])) 
+train_idx
+train_knn= empl_knn[train_idx,]
+test_knn = empl_knn[-train_idx,]
+
+# Run KNN on all of the features
+for (i in 3:dim(empl_knn)[2]){ 
+  if (i > 2) {
+    classif_knn = knn(data.frame(train_knn[, i]),data.frame(test_knn[, i]),train_knn$Attrition, prob = TRUE, k = 100)
+    results <- confusionMatrix(table(classif_knn,test_knn$Attrition))
+    temp3 <- data.frame(feature_names=colnames(empl_data[i]), acc=results[[3]][1], sens = results$byClass[1], spec = results$byClass[2])
+    acc_df_knn <- rbind(acc_df_knn, temp3)
+  }
+}
+
+unique(acc_df_knn$acc)
+unique(acc_df_knn$sens)
+unique(acc_df_knn$spec)
+
+
+```
+
+* KNN Cross Validation (CV) for each feature
+
+```{r}
+
+# Create new dataframes for accuracy results
+acc_df_knn_cv <- data.frame(feature_names=character(0),acc=numeric(0), sens=numeric(0), spec=numeric(0))
+
+# Run KNN CV on all of the features
+for (i in 3:dim(empl_knn)[2]){ 
+  if (i > 2) {
+    results_cv = confusionMatrix(table(knn.cv(empl_knn[,i], empl_knn$Attrition, k = 5), empl_knn$Attrition))
+    temp4 <- data.frame(feature_names=colnames(empl_knn[i]), acc=results_cv[[3]][1], sens = results_cv$byClass[1], spec = results_cv$byClass[2])
+    acc_df_knn_cv <- rbind(acc_df_knn_cv, temp4)
+  }
+}
+
+unique(acc_df_knn_cv$acc)
+unique(acc_df_knn_cv$sens)
+unique(acc_df_knn_cv$spec)
+
+
+# In this one TotalWorkingYears had the highest accuracy, but the specificity is still low
+
+
+```
+
+* Naive Bayes - Train Model
+
+```{r}
+
+# Create a new df
+empl_data2 <- empl_data[c(1:29)]
+
+# Split training data into train and test data
+set.seed(sample(1:100, 1))
+split_perc = .75
+train_idx = sample(1:dim(empl_data2)[1],round(split_perc * dim(empl_data2)[1])) 
+train_idx
+train = empl_data2[train_idx,]
+test = empl_data2[-train_idx,]
+
+# Create new dataframes for accuracy results
+acc_df_nb <- data.frame(feature_names=character(0),acc=numeric(0), sens=numeric(0), spec=numeric(0))
+
+model = naiveBayes(train[,3:29], train$Attrition, laplace = 1)
+results_nb = confusionMatrix(table(predict(model,test[,3:29]),test$Attrition))
+results_nb
+
+```
+
+* Naive Bayes - Predict Attrition on new data
+
+```{r}
+
+empl_attr_prdt <-  read.csv("CaseStudy2CompSet_No_Attrition.csv")
+
+# Add column for Attrition
+empl_attr_prdt$Attrition <- NA
+
+# Reorder columns
+empl_attr_prdt <- empl_attr_prdt[c(1,36,2:35)]
+
+# Drop Over18, StandardHours, EmployeeCount, ID, MonthlyRate
+empl_attr_prdt <- empl_attr_prdt[ , -which(names(empl_attr_prdt) %in% c("EmployeeNumber", "Over18","StandardHours", "EmployeeCount", "MonthlyRate", "HourlyRate", "DailyRate"))]
+
+# Compare datasets
+summary(comparedf(empl_data2, empl_attr_prdt))
+
+# Add prediction to MonthlyIncome column
+empl_attr_prdt$Attrition <- model %>% predict(empl_attr_prdt)
+
+# Export all data
+write.csv(empl_attr_prdt, "Case2PredictionsHermanAttrition-Full.csv", row.names=FALSE)
+
+# Export ID and Attrition
+export_attr <- empl_attr_prdt[c(1,2)]
+write.csv(export_attr, "Case2PredictionsHermanAttrition.csv", row.names=FALSE)
+
+```
+
+* Run NB on each feature individually
+
+```{r}
+
+# Run NB on all of the features
+for (i in 3:dim(empl_data)[2]){ 
+  if (i > 2) {
+    model = naiveBayes(train[,i], train$Attrition, laplace = 1)
+    results_nb = confusionMatrix(table(predict(model,test[,i]),test$Attrition))
+    temp5 <- data.frame(acc = c(results_nb$overall[1]), sens = c(results_nb$byClass[1]), spec = c(results_nb$byClass[2]))
+    acc_df_nb <-  rbind(acc_df_nb, temp5)
+  }
+}
+
+str(test)
+
+acc_df_nb
+max(acc_df_nb$acc)
+min(acc_df_nb$sens)
+max(acc_df_nb$spec)
+
+
+# Sort data
+sorted_results_nb <- acc_df_nb[order(-acc_df_nb$acc),][1:20,]
+sorted_results_nb
+
+# All values are the same with this model with factors and integers
+head(sorted_results_nb)
+
+```
+
+* Linear Regression - Train Model
+
+```{r}
+
+# Dataset to train on 
+empl_data
+
+# Create a training df with only numeric variables
+train_df <- empl_data %>% keep(is.numeric)
+
+# Split the data
+set.seed(123)
+tr_samples <- train_df$MonthlyIncome %>% createDataPartition(p = .95, list = FALSE)
+tr  <- train_df[tr_samples, ]
+td <- train_df[-tr_samples, ]
+
+# Build the model, use monthly income 
+model <- lm(MonthlyIncome ~., data = tr)
+
+# Summarize the model
+summary(model)
+
+# Make predictions on the test dataset
+preds <- model %>% predict(td)
+
+# Evaluate performance of the model with RMSE
+RMSE(preds, td$MonthlyIncome)
+
+```
+
+* Linear Regression - Predict Salary on new data
+```{r}
+
+# Import csv file without salary data
+empl_salary_prdt <-  read.csv("CaseStudy2CompSet_No_Salary.csv")
+
+# Change Attrition to an integer
+empl_salary_prdt$Attrition <- as.numeric(empl_salary_prdt$Attrition)
+
+# Drop Over18, StandardHours, EmployeeCount, ID, MonthlyRate
+empl_salary_prdt <- empl_salary_prdt[ , -which(names(empl_salary_prdt) %in% c("EmployeeNumber", "Over18","StandardHours", "EmployeeCount", "MonthlyRate", "HourlyRate", "DailyRate"))]
+
+# Fix ID name
+colnames(empl_salary_prdt)[1] <- "ID"
+
+# Add a blank column for monthly income
+income_pred <- empl_salary_prdt %>% keep(is.numeric)
+income_pred$MonthlyIncome <- NA 
+
+# Add prediction to MonthlyIncome column
+income_pred$MonthlyIncome <- model %>% predict(income_pred)
+grep("MonthlyIncome", colnames(income_pred))
+
+View(income_pred)
+
+# Export full dataset
+write.csv(income_pred, "Case2PredictionsHermanSalary-Full.csv", row.names=FALSE)
+
+# Export ID and MonthlyIncome
+export_df <- income_pred[c(1,22)]
+write.csv(export_df, "Case2PredictionsHermanSalary.csv", row.names=FALSE)
+
+```
+
+
+
