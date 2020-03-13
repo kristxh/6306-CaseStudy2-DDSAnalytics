@@ -30,9 +30,4 @@ You have been given a dataset (CaseStudy2-data.csv) to do a data analysis to ide
 
 ## Links
 
-* <add Youtube link>
-
-* <add RShiny link>
-
-
-
+* https://youtu.be/B3NS19GLUCk 
